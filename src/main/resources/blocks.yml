@@ -1,0 +1,42 @@
+'1':
+  material: STONE
+  model: 1
+  replacement-block: ANDESITE
+  name: "Custom Block #1"
+  lore:
+    - "This is a"
+    - "custom block"
+
+'2':
+  material: STONE # required
+  model: 2 # custom model data, not required
+  name: "Custom Block name" # not required
+  lore: # not required
+    - "Custom Block lore"
+  replacement-block: BARRIER #block that will replace the custom block, not required
+  break-only-admin: true # Only players with perm "acustomblocks.admin" can break this block, not required
+  break-by-hit: true # break by hit -_-, not required
+  can-exploded: true # not required
+  use-player-rotation: true #use player rotation to place rotated block, not required
+  rotation-round: 45 #if "use-player-rotation: true", will round the rotation angle to the nearest multiple of the specified number. Valid values: 15, 45, 90. default value is 90, not required
+  scale-x: 5.0 #default value is 1.002, not required
+  scale-y: 5.0 #default value is 1.002, not required
+  scale-z: 5.0 #default value is 1.002, not required
+  pos-x: 0.5 #default value is 0.5, not required
+  pos-y: 2.5 #default value is 0.5, not required
+  pos-z: 0.5 #default value is 0.5, not required
+
+'3':
+  material: STONE
+  model: 3
+  name: "Only admin block"
+  lore:
+    - "&eThis block can be broken only by player"
+    - "&ewho has \"acustomblocks.admin\" permission"
+  replacement-block: BARRIER
+  break-only-admin: true
+  break-by-hit: true
+  scale-x: 2.0
+  scale-y: 2.0
+  scale-z: 2.0
+  pos-y: 1.0
