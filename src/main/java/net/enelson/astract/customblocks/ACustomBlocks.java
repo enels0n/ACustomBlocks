@@ -13,20 +13,18 @@ import net.enelson.astract.customblocks.managers.config.ConfigManager;
 
 public class ACustomBlocks extends JavaPlugin {
 
-	private static ACustomBlocks plugin;
-	private BlockManager blockManager;
-	private ConfigManager configManager;
-	private boolean wg;
-	
-	public void onEnable() {
-		plugin = this;
-		
-		this.configManager = new ConfigManager(this);
-		this.reloadConfig();
-		
-		this.blockManager = new BlockManager(this);
-		
-		PluginManager pluginManager = Bukkit.getPluginManager();
+    private static ACustomBlocks plugin;
+    private BlockManager blockManager;
+    private ConfigManager configManager;
+
+    public void onEnable() {
+        plugin = this;
+        this.configManager = new ConfigManager(this);
+        this.reloadConfig();
+        this.blockManager = new BlockManager(this);
+
+        PluginManager pluginManager = Bukkit.getPluginManager();
+
 		try {
 			String pac = "net.enelson.astract.customblocks.listeners";
 			for (ClassPath.ClassInfo clazzInfo : ClassPath.from(getClassLoader()).getTopLevelClasses(pac)) {
@@ -38,46 +36,38 @@ public class ACustomBlocks extends JavaPlugin {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-		
-	    this.wg = getServer().getPluginManager().getPlugin("WorldGuard") != null;
-	    
-		this.getCommand("acustomblocks").setExecutor(new CommandManager());
-		this.getCommand("acustomblocks").setTabCompleter(new CommandManager());
-	}
 
-	public static ACustomBlocks getInstance() {
-		return plugin;
-	}
-	
-	public BlockManager getBlockManager() {
-		return this.blockManager;
-	}
-	
-	public ConfigManager getConfigManager() {
-		return this.configManager;
-	}
-	
-	public boolean isWorldGuardEnabled() {
-		return this.wg;
-	}
-	
-	public void reloadConfig() {
-		this.configManager.reloadConfig();
-	}
+        this.getCommand("acustomblocks").setExecutor(new CommandManager());
+        this.getCommand("acustomblocks").setTabCompleter(new CommandManager());
+    }
 
-	public void reloadPlugin() {
-		if (this.blockManager != null) {
-			this.blockManager.deInit();
-		}
+    public static ACustomBlocks getInstance() {
+        return plugin;
+    }
 
-		this.configManager.reloadConfig();
-		this.blockManager = new BlockManager(this);
-		this.wg = getServer().getPluginManager().getPlugin("WorldGuard") != null;
-	}
-	
-	public void onDisable() {
-		if (this.blockManager != null) {
-			this.blockManager.deInit();
-		}
-	}
+    public BlockManager getBlockManager() {
+        return this.blockManager;
+    }
+
+    public ConfigManager getConfigManager() {
+        return this.configManager;
+    }
+
+    public void reloadConfig() {
+        this.configManager.reloadConfig();
+    }
+
+    public void reloadPlugin() {
+        if (this.blockManager != null) {
+            this.blockManager.deInit();
+        }
+        this.configManager.reloadConfig();
+        this.blockManager = new BlockManager(this);
+    }
+
+    public void onDisable() {
+        if (this.blockManager != null) {
+            this.blockManager.deInit();
+        }
+    }
 }

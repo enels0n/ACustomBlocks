@@ -143,4 +143,17 @@ public class ConfigManager {
 			e.printStackTrace();
 		}
 	}
+	
+	public YamlConfiguration getConfig(@NotNull ConfigType type) {
+	    switch (type) {
+	        case CONFIG:
+	            return this.config;
+	        case BLOCKS:
+	            return this.blocks;
+	        case LOCALE:
+	            return this.locale;
+	        default:
+	            return this.db;
+	    }
+	}
 }

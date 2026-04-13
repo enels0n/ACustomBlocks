@@ -4,38 +4,54 @@ import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 
 public class CustomBlock {
-	
-	private String id;
-	private Location blockLocation;
-	private Entity entity;
-	private String entityUUID;
-	private float rotation;
-	
-	CustomBlock(String id, Location blockLocation, Entity entity, float rotation, String entityUUID) {
-		this.id = id;
-		this.blockLocation = blockLocation;
-		this.entity = entity;
-		this.rotation = rotation;
-		this.entityUUID = entityUUID;
-	}
-	
-	public Location getLocation() {
-		return this.blockLocation;
-	}
-	
-	public String getId() {
-		return this.id;
-	}
-	
-	public Entity getEntity() {
-		return this.entity;
-	}
-	
-	public String getEntityUUID() {
-		return this.entityUUID;
-	}
-	
-	public float getRotation() {
-		return this.rotation;
-	}
+
+    private final String id;
+    private final Location location;
+    private final Entity entity;
+    private final float rotationYaw;
+    private final float rotationPitch;
+    private final boolean usePitch;
+    private final String entityUUID;
+
+    public CustomBlock(String id, Location location, Entity entity, float rotationYaw, float rotationPitch, boolean usePitch, String entityUUID) {
+        this.id = id;
+        this.location = location;
+        this.entity = entity;
+        this.rotationYaw = rotationYaw;
+        this.rotationPitch = rotationPitch;
+        this.usePitch = usePitch;
+        this.entityUUID = entityUUID;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public Location getLocation() {
+        return location;
+    }
+
+    public Entity getEntity() {
+        return entity;
+    }
+
+    public float getRotation() {
+        return rotationYaw;
+    }
+
+    public float getRotationYaw() {
+        return rotationYaw;
+    }
+
+    public float getRotationPitch() {
+        return rotationPitch;
+    }
+
+    public boolean isUsePitch() {
+        return usePitch;
+    }
+
+    public String getEntityUUID() {
+        return entityUUID;
+    }
 }

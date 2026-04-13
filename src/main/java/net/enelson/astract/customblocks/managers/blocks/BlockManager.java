@@ -2,359 +2,366 @@ package net.enelson.astract.customblocks.managers.blocks;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
-import javax.annotation.Nullable;
-
-import org.bukkit.Bukkit;
-import org.bukkit.Chunk;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.block.Block;
-import org.bukkit.entity.ArmorStand;
-import org.bukkit.entity.Display;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.ItemDisplay;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.Damageable;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.scheduler.BukkitTask;
-import org.bukkit.util.Transformation;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 
 import net.enelson.astract.customblocks.ACustomBlocks;
+import net.enelson.astract.customblocks.managers.config.ConfigManager;
 import net.enelson.astract.customblocks.managers.config.ConfigType;
 import net.enelson.astract.customblocks.utils.Utils;
+import net.enelson.sopli.lib.SopLib;
+import net.enelson.sopli.lib.customblocks.CustomBlockVisualOptions;
+import net.enelson.sopli.lib.customblocks.CustomBlockVisualService;
 
 public class BlockManager {
-	private final List<CustomBlock> blocks;
-	private final List<Entity> entities;
-	private final ACustomBlocks plugin;
-	private final BukkitTask tasker;
 
-	public BlockManager(ACustomBlocks plugin) {
-		this.plugin = plugin;
-		this.blocks = new ArrayList<>();
-		this.entities = new ArrayList<>();
-		
-		this.tasker = Bukkit.getScheduler().runTaskTimer(plugin, new Runnable() {
-			@Override
-			public void run() {
-				save();
-			}
-		}, 20 * 60, 20 * 60);
+    private final ACustomBlocks plugin;
+    private final ConfigManager configManager;
+    private final CustomBlockVisualService visualService;
 
-		if (this.plugin.getConfigManager().getDB().getConfigurationSection("") == null) {
-			return;
-		}
+    private final Map<String, CustomBlock> blocksByLocation = new LinkedHashMap<String, CustomBlock>();
+    private final Map<UUID, CustomBlock> blocksByEntityUuid = new LinkedHashMap<UUID, CustomBlock>();
 
-		for (String i : this.plugin.getConfigManager().getDB().getConfigurationSection("").getKeys(false)) {
-			String id = this.plugin.getConfigManager().getDB().getString(i + ".id");
-			String uuid = this.plugin.getConfigManager().getDB().getString(i + ".entityUUID");
-			Location location = Utils.getDeserializedLocation(i);
-			boolean oldSystem = this.plugin.getConfigManager().getDB().getBoolean(i + ".old-system");
+    public BlockManager(ACustomBlocks plugin) {
+        this.plugin = plugin;
+        this.configManager = plugin.getConfigManager();
+        this.visualService = SopLib.getInstance().getCustomBlockVisualService();
 
-			if (id == null || location.getWorld() == null) {
-				this.plugin.getConfigManager().getDB().set(i, null);
-				continue;
-			}
+        plugin.getLogger().info("VisualService: " + visualService.getClass().getName());
+        loadFromDb();
+    }
 
-			if (uuid != null) {
-				Entity entity = Bukkit.getEntity(UUID.fromString(uuid));
-				if (entity != null) {
-					entity.remove();
-				}
-			}
+    public Entity createEntityWithoutBlock(Location location, ItemStack item, String id, CustomBlockVisualOptions options) {
+        return visualService.createEntityWithoutBlock(location, item, id, options);
+    }
 
-			if (location.getBlock().getType().equals(Material.AIR) && !this.hasAirReplacement(id)) {
-				this.plugin.getConfigManager().getDB().set(i, null);
-				continue;
-			}
+    public void removeEntityWithoutBlock(Entity entity) {
+        visualService.removeEntityWithoutBlock(entity);
+    }
 
-			float rotation = (float) this.plugin.getConfigManager().getDB().getDouble(i + ".rotation");
-			Entity displayEntity = oldSystem ? this.createOldEntity(location, id, rotation)
-					: this.createEntity(location.getBlock(), id, rotation);
-			CustomBlock block = new CustomBlock(id, location, displayEntity, displayEntity.getLocation().getYaw(),
-					displayEntity.getUniqueId().toString());
-			this.plugin.getConfigManager().getDB().set(i + ".entityUUID",
-					displayEntity.getUniqueId().toString().toLowerCase());
-			this.blocks.add(block);
-		}
-	}
+    public boolean isCustomBlockArmorStand(Entity entity) {
+        return visualService.isManagedEntity(entity);
+    }
 
-	public CustomBlock getBlock(Location location) {
-		return this.blocks.stream().filter(b -> b.getLocation().equals(location)).findFirst().orElse(null);
-	}
+    public CustomBlock getBlock(Location location) {
+        if (location == null || location.getWorld() == null) {
+            return null;
+        }
+        return blocksByLocation.get(key(location));
+    }
 
-	public CustomBlock getBlock(Entity entity) {
-		return this.blocks.stream().filter(b -> b.getEntity().equals(entity)).findFirst().orElse(null);
-	}
+    public CustomBlock getBlock(Entity entity) {
+        if (entity == null) {
+            return null;
+        }
+        return blocksByEntityUuid.get(entity.getUniqueId());
+    }
 
-	public void addBlock(String id, Location location, Player player) {
-		if (this.getBlock(location) != null) {
-			return;
-		}
+    public void addBlock(String id, Location location, Player player) {
+        if (id == null || location == null || location.getWorld() == null) {
+            return;
+        }
 
-		String path = Utils.getSerializedLocation(location);
+        ItemStack item = Utils.generateItem(id);
+        if (item == null || item.getType() == Material.AIR) {
+            plugin.getLogger().warning("Failed to create visual item for custom block id: " + id);
+            return;
+        }
 
-		Entity entity;
-		boolean oldSystem = this.plugin.getConfigManager().getBoolean(ConfigType.BLOCKS, id + ".old-system");
-		if (oldSystem) {
-			this.plugin.getConfigManager().getDB().set(path + ".old-system", true);
-			entity = this.createOldEntity(location, id, this.getDirection(player, id));
-		} else {
-			this.plugin.getConfigManager().getDB().set(path + ".old-system", null);
-			entity = this.createEntity(location.getBlock(), id, player);
-		}
-		
-		this.blocks.add(
-				new CustomBlock(id, location, entity, entity.getLocation().getYaw(), entity.getUniqueId().toString()));
+        boolean useYaw = configManager.getBoolean(ConfigType.BLOCKS, id + ".use-yaw");
+        boolean usePitch = configManager.getBoolean(ConfigType.BLOCKS, id + ".use-pitch");
 
-		this.plugin.getConfigManager().getDB().set(path + ".id", id);
-		this.plugin.getConfigManager().getDB().set(path + ".rotation", entity.getLocation().getYaw());
-		this.plugin.getConfigManager().getDB().set(path + ".entityUUID",
-				entity.getUniqueId().toString().toLowerCase());
-	}
+        double yawStep = readRotationStep(id + ".yaw-rotation-round", 90.0d);
+        double pitchStep = readRotationStep(id + ".pitch-rotation-round", 0.0d);
 
-	public ItemStack removeBlock(CustomBlock block) {
-		this.removeEntity(block.getEntity(), block.getEntityUUID());
-		this.blocks.remove(block);
-		this.plugin.getConfigManager().getDB().set(Utils.getSerializedLocation(block.getLocation()),
-				null);
-		return Utils.generateItem(block.getId(), 1);
-	}
+        float yaw = 0.0f;
+        if (useYaw && player != null) {
+            float playerYaw = player.getLocation().getYaw();
+            float roundedYaw = roundRotation(playerYaw, yawStep);
+            yaw = (roundedYaw + 180.0f) % 360.0f;
+        }
 
-	public void breakBlock(CustomBlock block, @Nullable Player player) {
-		block.getLocation().getBlock().setType(Material.AIR);
+        float pitch = usePitch && player != null
+                ? roundRotation(player.getLocation().getPitch(), pitchStep)
+                : 0.0f;
 
-		if (player != null) {
-			ItemStack item = Utils.generateItem(block.getId());
-			if (player.getInventory().addItem(item).size() != 0) {
-				player.getWorld().dropItem(block.getLocation(), item);
-			}
-		}
+        CustomBlockVisualOptions options = readVisualOptions(id, yaw, pitch, usePitch);
 
-		this.removeBlock(block);
-	}
+        Location base = location.getBlock().getLocation();
+        Location spawn = base.clone().add(
+                options.getOffsetX(),
+                options.getOffsetY(),
+                options.getOffsetZ()
+        );
 
-	private ItemDisplay createEntity(Block block, String id, float rotation) {
-		double posX = this.plugin.getConfigManager().isNull(ConfigType.BLOCKS, id + ".pos-x") ? 0.5
-				: this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".pos-x");
-		double posY = this.plugin.getConfigManager().isNull(ConfigType.BLOCKS, id + ".pos-y") ? 0.5
-				: this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".pos-y");
-		double posZ = this.plugin.getConfigManager().isNull(ConfigType.BLOCKS, id + ".pos-z") ? 0.5
-				: this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".pos-z");
+        CustomBlockVisualOptions spawnOptions = CustomBlockVisualOptions.of(
+                options.getYaw(),
+                options.getPitch(),
+                options.isUsePitch(),
+                0.0d,
+                0.0d,
+                0.0d,
+                options.getScaleX(),
+                options.getScaleY(),
+                options.getScaleZ()
+        );
 
-		Location entityLocation = block.getLocation().add(posX, posY, posZ);
-		entityLocation.setPitch(0.0f);
+        Entity entity = createEntityWithoutBlock(spawn, item, id, spawnOptions);
 
-		entityLocation.setYaw(rotation);
+        CustomBlock customBlock = new CustomBlock(
+                id,
+                base,
+                entity,
+                yaw,
+                pitch,
+                usePitch,
+                entity != null ? entity.getUniqueId().toString() : null
+        );
 
-		String material = this.plugin.getConfigManager().getString(ConfigType.BLOCKS, id + ".material");
-		int model = this.plugin.getConfigManager().getInt(ConfigType.BLOCKS, id + ".model");
-		
-		ItemStack item = Utils.generateModeledItemForItemDisplay(material, model);
+        put(customBlock);
+        save();
+    }
 
-		ItemDisplay itemEntity = block.getWorld().spawn(entityLocation, ItemDisplay.class);
-		itemEntity.setItemStack(item);
+    public void breakBlock(CustomBlock block, Player player) {
+        if (block == null) {
+            return;
+        }
 
-		itemEntity.setInvulnerable(true);
-		itemEntity.setSilent(true);
-		
-		int blockLight = 6;
-		int skyLight = 11;
-		if (!this.plugin.getConfigManager().isNull(ConfigType.BLOCKS, id + ".blockLight")) {
-			blockLight = this.plugin.getConfigManager().getInt(ConfigType.BLOCKS, id + ".blockLight");
-		}
-		if (!this.plugin.getConfigManager().isNull(ConfigType.BLOCKS, id + ".skyLight")) {
-			skyLight = this.plugin.getConfigManager().getInt(ConfigType.BLOCKS, id + ".skyLight");
-		}
-		
-		itemEntity.setBrightness(new Display.Brightness(blockLight, skyLight));
+        removeStoredBlock(block);
 
-		float scaleX = (float) this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".scale-x");
-		float scaleY = (float) this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".scale-y");
-		float scaleZ = (float) this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".scale-z");
+        Location location = block.getLocation();
+        if (location != null && location.getWorld() != null) {
+            location.getBlock().setType(Material.AIR);
+        }
 
-		scaleX = scaleX > 0 ? scaleX : 1.002f;
-		scaleY = scaleY > 0 ? scaleY : 1.002f;
-		scaleZ = scaleZ > 0 ? scaleZ : 1.002f;
+        if (location != null && location.getWorld() != null) {
+            boolean shouldDrop = player == null || player.getGameMode() != GameMode.CREATIVE;
+            if (shouldDrop) {
+                ItemStack drop = Utils.generateItem(block.getId());
+                if (drop != null) {
+                    location.getWorld().dropItemNaturally(location.clone().add(0.5, 0.2, 0.5), drop);
+                }
+            }
+        }
 
-		itemEntity.setTransformation(new Transformation(new Vector3f(0.0f, 0.0f, 0.0f), // Translation
-				new Quaternionf(0.0f, 0.0f, 0.0f, 1.0f), // Left Rotation
-				new Vector3f(scaleX, scaleY, scaleZ), // Scale
-				new Quaternionf(0.0f, 0.0f, 0.0f, 1.0f) // Right Rotation
-		));
+        save();
+    }
 
-		return itemEntity;
-	}
+    public int debug(Location center, int radius) {
+        if (center == null || center.getWorld() == null) {
+            return 0;
+        }
 
-	private ItemStack createItem(String id, int damage) {
-		ItemStack item = new ItemStack(Material.valueOf(
-				this.plugin.getConfigManager().getString(ConfigType.BLOCKS, id + ".material").toUpperCase()));
-		item.setAmount(1);
+        int removed = 0;
+        Collection<Entity> entities = center.getWorld().getNearbyEntities(center, radius, radius, radius);
+        for (Entity entity : entities) {
+            if (visualService.isManagedEntity(entity)) {
+                entity.remove();
+                removed++;
+            }
+        }
+        return removed;
+    }
 
-		ItemMeta meta = item.getItemMeta();
-		if (meta instanceof Damageable damageable) {
-			damageable.setDamage(damage);
-		}
-		int model = this.plugin.getConfigManager().getInt(ConfigType.BLOCKS, id + ".model");
-		if (model > 0) {
-			meta.setCustomModelData(model);
-		}
-		item.setItemMeta(meta);
-		return item;
-	}
-	
-	public ItemDisplay createEntityWithoutBlock(Location location, String id, float rotation) {
-		ItemDisplay entity = this.createEntity(location.getBlock(), id, rotation);
-		this.entities.add(entity);
-		return entity;
-	}
+    public void save() {
+        YamlConfiguration db = configManager.getDB();
+        for (String key : db.getKeys(false)) {
+            db.set(key, null);
+        }
 
-	private ArmorStand createOldEntity(Location location, String id, float rotation) {
-		double posX = this.plugin.getConfigManager().isNull(ConfigType.BLOCKS, id + ".pos-x") ? 0.5
-				: this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".pos-x");
-		double posY = this.plugin.getConfigManager().isNull(ConfigType.BLOCKS, id + ".pos-y") ? 0.5
-				: this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".pos-y");
-		double posZ = this.plugin.getConfigManager().isNull(ConfigType.BLOCKS, id + ".pos-z") ? 0.5
-				: this.plugin.getConfigManager().getDouble(ConfigType.BLOCKS, id + ".pos-z");
+        for (CustomBlock block : blocksByLocation.values()) {
+            String base = key(block.getLocation());
+            db.set(base + ".id", block.getId());
+            db.set(base + ".location", Utils.getSerializedLocation(block.getLocation()));
+            db.set(base + ".yaw", block.getRotationYaw());
+            db.set(base + ".pitch", block.getRotationPitch());
+            db.set(base + ".usePitch", block.isUsePitch());
+            db.set(base + ".entityUUID", block.getEntityUUID());
+        }
 
-		Location entityLocation = location.clone().add(posX, posY, posZ);
+        configManager.saveDB();
+    }
 
-		entityLocation.setYaw(rotation);
-		ArmorStand stand = entityLocation.getWorld().spawn(entityLocation, ArmorStand.class);
-		stand.setGravity(false);
-		stand.setSmall(true);
-		stand.setVisible(false);
-		
-		ItemStack item = this.createItem(id, this.plugin.getConfigManager().getInt(ConfigType.BLOCKS, id + ".damage"));
-		ItemMeta meta = item.getItemMeta();
-		meta.setUnbreakable(true);
-		item.setItemMeta(meta);
-		stand.getEquipment().setHelmet(item);
-		
-		return stand;
-	}
-	
-	public ArmorStand createOldEntityWithoutBlock(Location location, String id, float rotation) {
+    public void deInit() {
+        for (CustomBlock block : new ArrayList<CustomBlock>(blocksByLocation.values())) {
+            if (block.getEntity() != null) {
+                visualService.removeEntityWithoutBlock(block.getEntity());
+            } else if (block.getEntityUUID() != null) {
+                try {
+                    visualService.removeEntityWithoutBlock(UUID.fromString(block.getEntityUUID()));
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+        }
 
-		ArmorStand stand = this.createOldEntity(location, id, rotation);
-		
-		this.entities.add(stand);
-		return stand;
-	}
-	
-	public void removeEntityWithoutBlock(Entity entity) {
-		if(this.entities.contains(entity)) {
-			this.entities.remove(entity);
-			this.removeEntity(entity);
-		}
-	}
+        save();
+        blocksByLocation.clear();
+        blocksByEntityUuid.clear();
+    }
 
-	private ItemDisplay createEntity(Block block, String id, Player player) {
-		float rotation = getDirection(player, id);
+    private void loadFromDb() {
+        YamlConfiguration db = configManager.getDB();
+        ConfigurationSection root = db.getConfigurationSection("");
+        if (root == null) {
+            return;
+        }
 
-		return this.createEntity(block, id, rotation);
-	}
+        for (String entryKey : root.getKeys(false)) {
+            String id = db.getString(entryKey + ".id");
+            String locationSerialized = db.getString(entryKey + ".location");
+            float yaw = (float) db.getDouble(entryKey + ".yaw", db.getDouble(entryKey + ".rotation"));
+            float pitch = (float) db.getDouble(entryKey + ".pitch");
+            boolean usePitch = db.getBoolean(entryKey + ".usePitch");
+            String entityUuid = db.getString(entryKey + ".entityUUID");
 
-	private float getDirection(Player player, String id) {
-		float rotation = 0;
-		if (this.plugin.getConfigManager().getBoolean(ConfigType.BLOCKS, id + ".use-player-rotation")) {
-			int round = this.plugin.getConfigManager().getInt(ConfigType.BLOCKS, id + ".rotation-round");
-			round = round > 0 ? round : 90;
-			round = round <= 90 ? round : 90;
+            if (id == null || locationSerialized == null) {
+                continue;
+            }
 
-			float yaw = player.getLocation().getYaw();
-			float roundedYaw = Math.round(yaw / round) * round;
-			rotation = (roundedYaw + 180) % 360;
-		}
-		
-		return rotation;
-	}
+            Location location;
+            try {
+                location = Utils.getDeserializedLocation(locationSerialized);
+            } catch (Exception ex) {
+                plugin.getLogger().warning("Skipping broken db entry: " + entryKey);
+                continue;
+            }
 
-	public int debug(Location location, int radius) {
-		int count = 0;
-		Collection<Entity> entities = location.getWorld().getNearbyEntities(location, radius, radius, radius);
-		for (Entity entity : entities) {
-			if (!(entity instanceof ItemDisplay))
-				continue;
+            Entity entity = null;
+            if (entityUuid != null && !entityUuid.isEmpty()) {
+                try {
+                    entity = org.bukkit.Bukkit.getEntity(UUID.fromString(entityUuid));
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
 
-			if (this.getBlock(entity) == null) {
-				entity.remove();
-				count++;
-			}
-		}
-		return count;
-	}
+            if (entity == null) {
+                ItemStack item = Utils.generateItem(id);
+                if (item != null && item.getType() != Material.AIR) {
+                    CustomBlockVisualOptions options = readVisualOptions(id, yaw, pitch, usePitch);
 
-	private void save() {
-		this.plugin.getConfigManager().saveDB();
-	}
-	
-	private void removeEntity(Entity entity) {
-		this.removeEntity(entity, entity != null ? entity.getUniqueId().toString() : null);
-	}
+                    Location spawn = location.getBlock().getLocation().clone().add(
+                            options.getOffsetX(),
+                            options.getOffsetY(),
+                            options.getOffsetZ()
+                    );
 
-	private void removeEntity(Entity entity, @Nullable String entityUuid) {
-		if (entity == null && entityUuid != null) {
-			entity = Bukkit.getEntity(UUID.fromString(entityUuid));
-		}
+                    CustomBlockVisualOptions spawnOptions = CustomBlockVisualOptions.of(
+                            options.getYaw(),
+                            options.getPitch(),
+                            options.isUsePitch(),
+                            0.0d,
+                            0.0d,
+                            0.0d,
+                            options.getScaleX(),
+                            options.getScaleY(),
+                            options.getScaleZ()
+                    );
 
-		if (entity == null) {
-			return;
-		}
+                    entity = createEntityWithoutBlock(spawn, item, id, spawnOptions);
+                    if (entity != null) {
+                        entityUuid = entity.getUniqueId().toString();
+                    }
+                }
+            }
 
-		if (entity.isValid() && entity.getLocation().getChunk().isLoaded()) {
-			entity.remove();
-		} else {
-			Chunk chunk = entity.getLocation().getChunk();
-			boolean wasForceLoaded = chunk.isForceLoaded();
-			if (!chunk.isLoaded()) {
-				chunk.setForceLoaded(true);
-				chunk.load();
-			}
+            put(new CustomBlock(
+                    id,
+                    location.getBlock().getLocation(),
+                    entity,
+                    yaw,
+                    pitch,
+                    usePitch,
+                    entityUuid
+            ));
+        }
+    }
 
-			Entity loadedEntity = Bukkit.getEntity(entity.getUniqueId());
-			if (loadedEntity != null) {
-				loadedEntity.remove();
-			}
+    private void put(CustomBlock customBlock) {
+        blocksByLocation.put(key(customBlock.getLocation()), customBlock);
+        if (customBlock.getEntity() != null) {
+            blocksByEntityUuid.put(customBlock.getEntity().getUniqueId(), customBlock);
+        }
+    }
 
-			if (!wasForceLoaded) {
-				chunk.setForceLoaded(false);
-			}
-		}
-	}
+    private void removeStoredBlock(CustomBlock customBlock) {
+        blocksByLocation.remove(key(customBlock.getLocation()));
 
-	public void deInit() {
-		this.tasker.cancel();
-		this.save();
-		//List<Chunk> chunks = new ArrayList<>();
-		this.blocks.forEach(b -> {
-			this.removeEntity(b.getEntity());
-			
-//			if (b.getEntity().isValid() && b.getEntity().getLocation().getChunk().isLoaded()) {
-//				b.getEntity().remove();
-//			} else {
-//				Chunk chunk = b.getLocation().getChunk();
-//				chunk.setForceLoaded(true);
-//				chunk.load();
-//				Bukkit.getEntity(UUID.fromString(b.getEntityUUID()));
-//			}
-		});
-		
-		this.entities.forEach(e -> this.removeEntity(e));
-	}
-	
-	public boolean isCustomBlockArmorStand(Entity entity) {
-		return this.entities.contains(entity);
-	}
-	
-	private boolean hasAirReplacement(String id) {
-		String replacement = this.plugin.getConfigManager().getString(ConfigType.BLOCKS, id + ".replacement-block");
-		return replacement != null && replacement.equalsIgnoreCase(Material.AIR.name());
-	}
+        if (customBlock.getEntity() != null) {
+            blocksByEntityUuid.remove(customBlock.getEntity().getUniqueId());
+            visualService.removeEntityWithoutBlock(customBlock.getEntity());
+        } else if (customBlock.getEntityUUID() != null) {
+            try {
+                UUID uuid = UUID.fromString(customBlock.getEntityUUID());
+                visualService.removeEntityWithoutBlock(uuid);
+                blocksByEntityUuid.remove(uuid);
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+    }
+
+    private CustomBlockVisualOptions readVisualOptions(String id, float yaw, float pitch, boolean usePitch) {
+        double posX = readPosition(id + ".pos-x", 0.5d);
+        double posY = readPosition(id + ".pos-y", 0.5d);
+        double posZ = readPosition(id + ".pos-z", 0.5d);
+
+        float scaleX = (float) readScale(id + ".scale-x", 1.002d);
+        float scaleY = (float) readScale(id + ".scale-y", 1.002d);
+        float scaleZ = (float) readScale(id + ".scale-z", 1.002d);
+
+        return CustomBlockVisualOptions.of(
+                yaw,
+                usePitch ? pitch : 0.0f,
+                usePitch,
+                posX,
+                posY,
+                posZ,
+                scaleX,
+                scaleY,
+                scaleZ
+        );
+    }
+
+    private double readPosition(String path, double fallback) {
+        YamlConfiguration blocks = configManager.getConfig(ConfigType.BLOCKS);
+        return blocks.contains(path) ? blocks.getDouble(path) : fallback;
+    }
+
+    private double readScale(String path, double fallback) {
+        YamlConfiguration blocks = configManager.getConfig(ConfigType.BLOCKS);
+        return blocks.contains(path) ? blocks.getDouble(path) : fallback;
+    }
+
+    private double readRotationStep(String path, double fallback) {
+        YamlConfiguration blocks = configManager.getConfig(ConfigType.BLOCKS);
+        return blocks.contains(path) ? blocks.getDouble(path) : fallback;
+    }
+
+    private float roundRotation(float value, double step) {
+        if (step <= 0.0d) {
+            return value;
+        }
+        return (float) (Math.round(value / step) * step);
+    }
+
+    private String key(Location location) {
+        return Utils.getSerializedLocation(location.getBlock().getLocation());
+    }
+
+    public ACustomBlocks getPlugin() {
+        return plugin;
+    }
+
+    public ConfigManager getConfigManager() {
+        return configManager;
+    }
 }

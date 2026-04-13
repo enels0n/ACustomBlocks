@@ -2,12 +2,11 @@ name: ${project.name}
 main: ${project.groupId}.${project.name}
 version: ${project.version}
 authors: [E_NeLsOn]
-depend: [PlaceholderAPI,NBTAPI]
-softdepend: [WorldGuard]
-api-version: 1.21
+depend: [SopLib, PlaceholderAPI, NBTAPI]
+api-version: 1.16
 commands:
   acustomblocks:
-    usage: /acustomblocks <about|reload|give>
+    usage: /acustomblocks
 permissions:
   acustomblocks.admin:
     default: op
